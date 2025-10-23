@@ -24,7 +24,7 @@ INTERVAL = "1m"         # '1m','3m','5m','15m','1h','4h','1d', etc. (Bybit sopor
 ATR_PERIOD = 10
 ATR_MULTIPLIER = 3.3
 FETCH_LIMIT = 400       # >= ATR_PERIOD + margen
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "PEGAR_AQUI_TU_WEBHOOK")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 USE_EMBED = True
 CHECK_DRIFT_SEC = 1     # margen al despertar tras cierre
 
@@ -238,3 +238,4 @@ def run_alerts():
 # =========================
 if __name__ == "__main__":
     run_alerts()
+
