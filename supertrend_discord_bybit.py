@@ -1,8 +1,8 @@
-# supertrend_discord_bybit.py
+# supertrend_discord_bitget.py
 # --------------------------------------------
-# Envía alertas a Discord al cierre de cada vela
+# Envia alertas a Discord al cierre de cada vela
 # cuando el Supertrend cambia de señal (BUY/SELL),
-# usando la API PÚBLICA de BYBIT vía CCXT.
+# usando la API pública de BITGET vía CCXT.
 # --------------------------------------------
 
 import os
@@ -19,14 +19,21 @@ warnings.filterwarnings("ignore")
 # =========================
 # CONFIG
 # =========================
-SYMBOL = "BTC/USDT"     # Spot: "BTC/USDT"; Perp lineal Bybit: "BTC/USDT:USDT"
-INTERVAL = "1m"         # '1m','3m','5m','15m','1h','4h','1d', etc. (Bybit soporta los comunes)
-ATR_PERIOD = 10
-ATR_MULTIPLIER = 3.3
-FETCH_LIMIT = 400       # >= ATR_PERIOD + margen
+# --- SPOT por defecto ---
+SYMBOL = "BTC/USDT"      # Spot en Bitget
+MARKET_TYPE = "spot"     # "spot" o "swap" (perp USDT-M)
+
+# Si quieres PERP USDT-M de Bitget:
+#   SYMBOL = "BTC/USDT:USDT"
+#   MARKET_TYPE = "swap"
+
+INTERVAL = "5m"          # '1m','5m','15m','1h','4h','1d', etc.
+ATR_PERIOD = 15
+ATR_MULTIPLIER = 3
+FETCH_LIMIT = 400        # >= ATR_PERIOD + margen
+CHECK_DRIFT_SEC = 1      # margen para esperar cierre exacto
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 USE_EMBED = True
-CHECK_DRIFT_SEC = 1     # margen al despertar tras cierre
 
 # =========================
 # TZ utils
@@ -58,7 +65,7 @@ def ts_strings(dt_utc: datetime) -> tuple[str, str]:
     return s_utc, s_mad
 
 # =========================
-# Discord
+# Discord helpers
 # =========================
 def send_discord_message(webhook_url: str, content: str = "", embed: dict | None = None) -> None:
     payload = {"content": content}
@@ -82,11 +89,11 @@ def build_embed(title: str, fields: list[tuple[str, str, bool]], color: int = 0x
     }
 
 # =========================
-# Data
+# Datos
 # =========================
 def fetch_last_ohlcv(exchange: ccxt.Exchange, symbol: str, timeframe: str, limit: int = FETCH_LIMIT) -> pd.DataFrame:
     """
-    Descarga últimas 'limit' velas y quita la última (en formación) para evitar repintado.
+    Descarga las últimas 'limit' velas y elimina la última (en formación) para evitar repintado.
     """
     ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     if not ohlcv or len(ohlcv) < ATR_PERIOD + 5:
@@ -102,7 +109,7 @@ def fetch_last_ohlcv(exchange: ccxt.Exchange, symbol: str, timeframe: str, limit
     return df
 
 # =========================
-# Supertrend
+# Supertrend + señales
 # =========================
 def supertrend(df: pd.DataFrame, atr_period: int = ATR_PERIOD, atr_multiplier: float = ATR_MULTIPLIER) -> pd.DataFrame:
     out = df.copy()
@@ -148,30 +155,30 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 # =========================
-# Loop
+# Loop principal
 # =========================
 def run_alerts():
     if not DISCORD_WEBHOOK or DISCORD_WEBHOOK == "PEGAR_AQUI_TU_WEBHOOK":
-        raise ValueError("Configura tu webhook de Discord en DISCORD_WEBHOOK o variable de entorno.")
+        raise ValueError("Configura tu webhook de Discord en DISCORD_WEBHOOK o en los Secrets de Replit.")
 
-    # ---- Bybit API pública vía CCXT ----
-    # Spot:
-    exchange = ccxt.bybit({
+    # ----- Bitget -----
+    # defaultType: "spot" (spot) o "swap" (perpetuos USDT-M)
+    exchange = ccxt.bitget({
         "enableRateLimit": True,
-        "options": {"defaultType": "spot"}   # para Perp lineal: {"defaultType":"linear"}
+        "options": {"defaultType": MARKET_TYPE}
     })
-
-    # Si quieres PERP LINEAL (USDT-M), cambia arriba defaultType a "linear"
-    # y usa SYMBOL = "BTC/USDT:USDT"
+    # Carga mercados para validar símbolo
+    exchange.load_markets()
+    if SYMBOL not in exchange.markets:
+        raise ValueError(f"Símbolo '{SYMBOL}' no encontrado en Bitget con MARKET_TYPE={MARKET_TYPE}. Revisa el nombre.")
 
     tf_sec = timeframe_to_seconds(INTERVAL)
-    print(f"Inicio de alertas Supertrend (BYBIT) → {SYMBOL} | {INTERVAL} | ATR({ATR_PERIOD}) x {ATR_MULTIPLIER}")
+    print(f"Inicio de alertas Supertrend (BITGET/{MARKET_TYPE.upper()}) → {SYMBOL} | {INTERVAL} | ATR({ATR_PERIOD}) x {ATR_MULTIPLIER}")
 
     last_alert_candle_ts = None
 
     while True:
         try:
-            # esperar hasta el cierre exacto según UTC (Bybit también cierra por UTC)
             now_utc = datetime.now(timezone.utc)
             wait = seconds_to_next_candle_close(now_utc, tf_sec)
             print(f"Esperando {wait}s hasta cierre de vela...")
@@ -192,7 +199,7 @@ def run_alerts():
 
             if (sig_now != sig_prev) and (sig_now in (1.0, -1.0)) and (candle_ts_ms != last_alert_candle_ts):
                 direction = "🟢 BUY" if sig_now == 1.0 else "🔴 SELL"
-                title = f"{direction} — Supertrend (Bybit)"
+                title = f"{direction} — Supertrend (Bitget {MARKET_TYPE})"
                 fields = [
                     ("Símbolo", f"`{SYMBOL}`", True),
                     ("Timeframe", f"`{INTERVAL}`", True),
@@ -238,4 +245,3 @@ def run_alerts():
 # =========================
 if __name__ == "__main__":
     run_alerts()
-
